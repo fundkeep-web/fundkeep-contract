@@ -36,7 +36,7 @@ stellar keys generate deployer --network testnet --fund
 ./scripts/deploy.sh deployer
 ```
 
-The script builds, deploys, and prints the resulting contract ID along with the env vars that need updating in `fundkeep-app` and `fundkeep-indexer`.
+The script builds, deploys, and prints the resulting contract ID and Testnet RPC settings. Configure a verified token SAC separately before setting `NEXT_PUBLIC_USDC_CONTRACT_ID` in `fundkeep-app`.
 
 ## Contract Interface
 
