@@ -1,7 +1,7 @@
 use crate::{Error, FundKeepContract, FundKeepContractClient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
-    token, Address, Env,
+    token, Address, Env, String,
 };
 
 const DAY: u64 = 24 * 60 * 60;
@@ -55,6 +55,7 @@ fn create_goal_with_valid_params_returns_zero() {
         &ctx.token_address,
         &(100 * USDC_DECIMALS),
         &deadline,
+        &None,
     );
 
     assert_eq!(goal_id, 0);
@@ -70,7 +71,7 @@ fn create_goal_with_valid_params_returns_zero() {
     // Second goal gets the next sequential ID.
     let second_id =
         ctx.client
-            .create_goal(&owner, &ctx.token_address, &(50 * USDC_DECIMALS), &deadline);
+            .create_goal(&owner, &ctx.token_address, &(50 * USDC_DECIMALS), &deadline, &None);
     assert_eq!(second_id, 1);
 }
 
@@ -82,7 +83,7 @@ fn create_goal_with_zero_target_fails() {
 
     let result = ctx
         .client
-        .try_create_goal(&owner, &ctx.token_address, &0, &deadline);
+        .try_create_goal(&owner, &ctx.token_address, &0, &deadline, &None);
 
     assert_eq!(result, Err(Ok(Error::InvalidAmount)));
 }
@@ -98,6 +99,7 @@ fn create_goal_with_past_deadline_fails() {
         &ctx.token_address,
         &(100 * USDC_DECIMALS),
         &past_deadline,
+        &None,
     );
 
     assert_eq!(result, Err(Ok(Error::InvalidDeadline)));
@@ -117,6 +119,7 @@ fn deposit_under_target_keeps_goal_locked() {
         &ctx.token_address,
         &(100 * USDC_DECIMALS),
         &deadline,
+        &None,
     );
 
     ctx.client.deposit(&owner, &goal_id, &(40 * USDC_DECIMALS));
@@ -139,6 +142,7 @@ fn deposit_crossing_target_unlocks_in_same_call() {
         &ctx.token_address,
         &(100 * USDC_DECIMALS),
         &deadline,
+        &None,
     );
 
     ctx.client.deposit(&owner, &goal_id, &(60 * USDC_DECIMALS));
@@ -162,6 +166,7 @@ fn deposit_from_non_owner_fails() {
         &ctx.token_address,
         &(100 * USDC_DECIMALS),
         &deadline,
+        &None,
     );
 
     let result = ctx
@@ -183,6 +188,7 @@ fn deposit_after_withdrawn_fails() {
         &ctx.token_address,
         &(100 * USDC_DECIMALS),
         &deadline,
+        &None,
     );
     ctx.client.deposit(&owner, &goal_id, &(100 * USDC_DECIMALS));
     ctx.client.withdraw(&owner, &goal_id);
@@ -208,6 +214,7 @@ fn withdraw_while_locked_fails() {
         &ctx.token_address,
         &(100 * USDC_DECIMALS),
         &deadline,
+        &None,
     );
     ctx.client.deposit(&owner, &goal_id, &(10 * USDC_DECIMALS));
 
@@ -228,6 +235,7 @@ fn withdraw_after_target_unlock_succeeds() {
         &ctx.token_address,
         &(100 * USDC_DECIMALS),
         &deadline,
+        &None,
     );
     ctx.client.deposit(&owner, &goal_id, &(100 * USDC_DECIMALS));
 
@@ -251,6 +259,7 @@ fn second_withdraw_on_same_goal_fails() {
         &ctx.token_address,
         &(100 * USDC_DECIMALS),
         &deadline,
+        &None,
     );
     ctx.client.deposit(&owner, &goal_id, &(100 * USDC_DECIMALS));
     ctx.client.withdraw(&owner, &goal_id);
@@ -273,6 +282,7 @@ fn withdraw_from_non_owner_fails() {
         &ctx.token_address,
         &(100 * USDC_DECIMALS),
         &deadline,
+        &None,
     );
     ctx.client.deposit(&owner, &goal_id, &(100 * USDC_DECIMALS));
 
@@ -294,6 +304,7 @@ fn check_deadline_before_deadline_is_noop() {
         &ctx.token_address,
         &(100 * USDC_DECIMALS),
         &deadline,
+        &None,
     );
 
     ctx.client.check_deadline(&goal_id);
@@ -313,6 +324,7 @@ fn check_deadline_after_deadline_unlocks() {
         &ctx.token_address,
         &(100 * USDC_DECIMALS),
         &deadline,
+        &None,
     );
 
     ctx.env.ledger().set_timestamp(deadline + 1);
@@ -334,6 +346,7 @@ fn withdraw_after_deadline_unlock_succeeds() {
         &ctx.token_address,
         &(100 * USDC_DECIMALS),
         &deadline,
+        &None,
     );
     ctx.client.deposit(&owner, &goal_id, &(30 * USDC_DECIMALS));
 
@@ -357,4 +370,44 @@ fn get_goal_for_missing_id_fails() {
     let result = ctx.client.try_get_goal(&999);
 
     assert_eq!(result, Err(Ok(Error::GoalNotFound)));
+}
+
+
+// ── metadata_uri ──────────────────────────────────────────────────────────
+
+#[test]
+fn create_goal_with_metadata_uri_succeeds() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, 30 * DAY);
+    let uri = String::from_str(&ctx.env, "ipfs://bafybeicg7v3z323h6wz36k3z26");
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(100 * USDC_DECIMALS),
+        &deadline,
+        &Some(uri.clone()),
+    );
+
+    let goal = ctx.client.get_goal(&goal_id);
+    assert_eq!(goal.metadata_uri, Some(uri));
+}
+
+#[test]
+fn create_goal_without_metadata_uri_defaults_none() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, 30 * DAY);
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(100 * USDC_DECIMALS),
+        &deadline,
+        &None,
+    );
+
+    let goal = ctx.client.get_goal(&goal_id);
+    assert_eq!(goal.metadata_uri, None);
 }
