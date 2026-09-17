@@ -358,3 +358,75 @@ fn get_goal_for_missing_id_fails() {
 
     assert_eq!(result, Err(Ok(Error::GoalNotFound)));
 }
+
+// ── boundary tests for check_deadline ─────────────────────────────────────
+
+#[test]
+fn check_deadline_exactly_one_second_before_is_noop() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, 100);
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(100 * USDC_DECIMALS),
+        &deadline,
+    );
+
+    // Exactly 1 second before deadline: timestamp == deadline - 1
+    ctx.env.ledger().set_timestamp(deadline - 1);
+    ctx.client.check_deadline(&goal_id);
+
+    let goal = ctx.client.get_goal(&goal_id);
+    assert!(!goal.unlocked, "Goal must remain locked when timestamp < deadline");
+}
+
+#[test]
+fn check_deadline_exact_timestamp_boundary_unlocks() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, 100);
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(100 * USDC_DECIMALS),
+        &deadline,
+    );
+
+    // Exactly at the boundary: timestamp == deadline
+    ctx.env.ledger().set_timestamp(deadline);
+    ctx.client.check_deadline(&goal_id);
+
+    let goal = ctx.client.get_goal(&goal_id);
+    assert!(goal.unlocked, "Goal must unlock at timestamp == deadline");
+}
+
+#[test]
+fn check_deadline_after_already_unlocked_is_idempotent() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, 100);
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(100 * USDC_DECIMALS),
+        &deadline,
+    );
+
+    // Unlock at boundary
+    ctx.env.ledger().set_timestamp(deadline);
+    ctx.client.check_deadline(&goal_id);
+    assert!(ctx.client.get_goal(&goal_id).unlocked);
+
+    // Second call well past deadline
+    ctx.env.ledger().set_timestamp(deadline + 500);
+    ctx.client.check_deadline(&goal_id);
+
+    let goal_after = ctx.client.get_goal(&goal_id);
+    assert!(goal_after.unlocked);
+    assert!(!goal_after.withdrawn);
+}
+
