@@ -38,3 +38,12 @@ pub struct Withdraw {
     pub owner: Address,
     pub amount: i128,
 }
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeadlineExtended {
+    #[topic]
+    pub goal_id: u32,
+    pub old_deadline: u64,
+    pub new_deadline: u64,
+}

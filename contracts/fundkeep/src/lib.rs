@@ -208,4 +208,40 @@ impl FundKeepContract {
     pub fn get_goal(env: Env, goal_id: u32) -> Result<SavingsGoal, Error> {
         load_goal(&env, goal_id)
     }
+
+    /// Allows the goal owner to extend their savings deadline prior to expiration.
+    /// Rejects calls if the goal is already unlocked or withdrawn, or if the new deadline
+    /// is not strictly greater than the current deadline.
+    pub fn extend_deadline(env: Env, caller: Address, goal_id: u32, new_deadline: u64) -> Result<(), Error> {
+        caller.require_auth();
+
+        let mut goal = load_goal(&env, goal_id)?;
+
+        if caller != goal.owner {
+            return Err(Error::Unauthorized);
+        }
+        if goal.withdrawn {
+            return Err(Error::AlreadyWithdrawn);
+        }
+        if goal.unlocked {
+            return Err(Error::GoalAlreadyUnlocked);
+        }
+        if new_deadline <= goal.deadline {
+            return Err(Error::InvalidDeadline);
+        }
+
+        let old_deadline = goal.deadline;
+        goal.deadline = new_deadline;
+
+        save_goal(&env, goal_id, &goal);
+
+        events::DeadlineExtended {
+            goal_id,
+            old_deadline,
+            new_deadline,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
 }
