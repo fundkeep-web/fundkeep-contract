@@ -36,6 +36,20 @@ fn save_goal(env: &Env, goal_id: u32, goal: &SavingsGoal) {
     bump_instance(env);
 }
 
+fn load_contribution(env: &Env, goal_id: u32, depositor: &Address) -> i128 {
+    env.storage()
+        .instance()
+        .get(&DataKey::GoalContribution(goal_id, depositor.clone()))
+        .unwrap_or(0)
+}
+
+fn save_contribution(env: &Env, goal_id: u32, depositor: &Address, amount: i128) {
+    env.storage()
+        .instance()
+        .set(&DataKey::GoalContribution(goal_id, depositor.clone()), &amount);
+    bump_instance(env);
+}
+
 #[contract]
 pub struct FundKeepContract;
 
@@ -49,6 +63,29 @@ impl FundKeepContract {
         token: Address,
         target_amount: i128,
         deadline: u64,
+    ) -> Result<u32, Error> {
+        Self::create_goal_internal(env, owner, token, target_amount, deadline, false)
+    }
+
+    /// Creates a new group savings goal where any address can contribute toward
+    /// `target_amount` until `deadline`. Returns the new goal's ID.
+    pub fn create_group_goal(
+        env: Env,
+        owner: Address,
+        token: Address,
+        target_amount: i128,
+        deadline: u64,
+    ) -> Result<u32, Error> {
+        Self::create_goal_internal(env, owner, token, target_amount, deadline, true)
+    }
+
+    fn create_goal_internal(
+        env: Env,
+        owner: Address,
+        token: Address,
+        target_amount: i128,
+        deadline: u64,
+        is_group: bool,
     ) -> Result<u32, Error> {
         owner.require_auth();
 
@@ -73,6 +110,7 @@ impl FundKeepContract {
             deadline,
             unlocked: false,
             withdrawn: false,
+            is_group,
         };
 
         save_goal(&env, goal_id, &goal);
@@ -94,9 +132,10 @@ impl FundKeepContract {
     }
 
     /// Transfers `amount` of the goal's token from `caller` to the contract
-    /// and adds it to the goal's `current_amount`. `caller` must be the
-    /// goal's owner. Auto-unlocks the goal in the same call if the target is
-    /// reached.
+    /// and adds it to the goal's `current_amount`.
+    /// For single-owner goals, `caller` must be the goal's owner.
+    /// For group goals, any address may deposit.
+    /// Auto-unlocks the goal in the same call if the target is reached.
     pub fn deposit(env: Env, caller: Address, goal_id: u32, amount: i128) -> Result<(), Error> {
         caller.require_auth();
 
@@ -109,7 +148,7 @@ impl FundKeepContract {
         if goal.withdrawn {
             return Err(Error::AlreadyWithdrawn);
         }
-        if caller != goal.owner {
+        if !goal.is_group && caller != goal.owner {
             return Err(Error::Unauthorized);
         }
 
@@ -127,6 +166,13 @@ impl FundKeepContract {
         if goal.current_amount >= goal.target_amount {
             goal.unlocked = true;
         }
+
+        // Track per-depositor contribution
+        let prev_contrib = load_contribution(&env, goal_id, &caller);
+        let new_contrib = prev_contrib
+            .checked_add(amount)
+            .ok_or(Error::InvalidAmount)?;
+        save_contribution(&env, goal_id, &caller, new_contrib);
 
         save_goal(&env, goal_id, &goal);
 
@@ -165,16 +211,14 @@ impl FundKeepContract {
         Ok(())
     }
 
-    /// Transfers the goal's full `current_amount` back to `caller`, who must
-    /// be the goal's owner. Only permitted once the goal is unlocked.
+    /// Transfers the goal's funds back to `caller`. Only permitted once the goal is unlocked.
+    /// For single-owner goals, `caller` must be the owner and withdraws the full amount.
+    /// For group goals, `caller` receives their contributed share. A depositor who contributed 0 gets 0 (Unauthorized).
     pub fn withdraw(env: Env, caller: Address, goal_id: u32) -> Result<(), Error> {
         caller.require_auth();
 
         let mut goal = load_goal(&env, goal_id)?;
 
-        if caller != goal.owner {
-            return Err(Error::Unauthorized);
-        }
         if goal.withdrawn {
             return Err(Error::AlreadyWithdrawn);
         }
@@ -182,15 +226,34 @@ impl FundKeepContract {
             return Err(Error::NotUnlocked);
         }
 
-        let amount = goal.current_amount;
+        let amount = if goal.is_group {
+            let contrib = load_contribution(&env, goal_id, &caller);
+            if contrib <= 0 {
+                return Err(Error::Unauthorized);
+            }
+            save_contribution(&env, goal_id, &caller, 0);
+            contrib
+        } else {
+            if caller != goal.owner {
+                return Err(Error::Unauthorized);
+            }
+            goal.current_amount
+        };
+
         token::TokenClient::new(&env, &goal.token).transfer(
             &env.current_contract_address(),
             &caller,
             &amount,
         );
 
-        goal.current_amount = 0;
-        goal.withdrawn = true;
+        goal.current_amount = goal
+            .current_amount
+            .checked_sub(amount)
+            .ok_or(Error::InvalidAmount)?;
+
+        if goal.current_amount == 0 {
+            goal.withdrawn = true;
+        }
 
         save_goal(&env, goal_id, &goal);
 
@@ -202,6 +265,11 @@ impl FundKeepContract {
         .publish(&env);
 
         Ok(())
+    }
+
+    /// Publicly readable. Returns the contribution amount for a specific depositor in a goal.
+    pub fn get_contribution(env: Env, goal_id: u32, depositor: Address) -> i128 {
+        load_contribution(&env, goal_id, &depositor)
     }
 
     /// Publicly readable. Returns the full on-chain state of a goal.
