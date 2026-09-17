@@ -5,6 +5,7 @@ use soroban_sdk::{contracttype, Address};
 pub enum DataKey {
     Goal(u32),
     GoalCounter,
+    GoalContribution(u32, Address),
 }
 
 #[contracttype]
@@ -17,4 +18,5 @@ pub struct SavingsGoal {
     pub deadline: u64,
     pub unlocked: bool,
     pub withdrawn: bool,
+    pub is_group: bool,
 }

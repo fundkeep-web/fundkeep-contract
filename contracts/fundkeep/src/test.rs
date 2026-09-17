@@ -358,3 +358,96 @@ fn get_goal_for_missing_id_fails() {
 
     assert_eq!(result, Err(Ok(Error::GoalNotFound)));
 }
+
+// ── group savings goals (Issue #2) ────────────────────────────────────────
+
+#[test]
+fn group_goal_multiple_depositors_and_proportional_withdraw() {
+    let ctx = setup();
+    let creator = Address::generate(&ctx.env);
+    let user_a = Address::generate(&ctx.env);
+    let user_b = Address::generate(&ctx.env);
+    let stranger = Address::generate(&ctx.env);
+
+    ctx.token_admin.mint(&user_a, &(100 * USDC_DECIMALS));
+    ctx.token_admin.mint(&user_b, &(100 * USDC_DECIMALS));
+
+    let deadline = future_deadline(&ctx, 30 * DAY);
+    let target = 80 * USDC_DECIMALS;
+
+    let goal_id = ctx.client.create_group_goal(
+        &creator,
+        &ctx.token_address,
+        &target,
+        &deadline,
+    );
+
+    let goal = ctx.client.get_goal(&goal_id);
+    assert!(goal.is_group);
+    assert!(!goal.unlocked);
+
+    // user_a deposits 50 USDC
+    ctx.client.deposit(&user_a, &goal_id, &(50 * USDC_DECIMALS));
+    assert_eq!(ctx.client.get_contribution(&goal_id, &user_a), 50 * USDC_DECIMALS);
+    assert_eq!(ctx.client.get_contribution(&goal_id, &user_b), 0);
+
+    let goal = ctx.client.get_goal(&goal_id);
+    assert_eq!(goal.current_amount, 50 * USDC_DECIMALS);
+    assert!(!goal.unlocked);
+
+    // user_b deposits 30 USDC, reaching target (80 USDC) -> unlocks
+    ctx.client.deposit(&user_b, &goal_id, &(30 * USDC_DECIMALS));
+    assert_eq!(ctx.client.get_contribution(&goal_id, &user_b), 30 * USDC_DECIMALS);
+
+    let goal = ctx.client.get_goal(&goal_id);
+    assert_eq!(goal.current_amount, 80 * USDC_DECIMALS);
+    assert!(goal.unlocked);
+
+    // stranger (0 contribution) attempts to withdraw -> Unauthorized
+    let stranger_res = ctx.client.try_withdraw(&stranger, &goal_id);
+    assert_eq!(stranger_res, Err(Ok(Error::Unauthorized)));
+
+    // user_a withdraws their 50 USDC share
+    ctx.client.withdraw(&user_a, &goal_id);
+    assert_eq!(ctx.token.balance(&user_a), 100 * USDC_DECIMALS);
+    assert_eq!(ctx.client.get_contribution(&goal_id, &user_a), 0);
+
+    let goal = ctx.client.get_goal(&goal_id);
+    assert_eq!(goal.current_amount, 30 * USDC_DECIMALS);
+    assert!(!goal.withdrawn);
+
+    // user_a attempts second withdraw -> Unauthorized (contribution is now 0)
+    let double_withdraw = ctx.client.try_withdraw(&user_a, &goal_id);
+    assert_eq!(double_withdraw, Err(Ok(Error::Unauthorized)));
+
+    // user_b withdraws their 30 USDC share
+    ctx.client.withdraw(&user_b, &goal_id);
+    assert_eq!(ctx.token.balance(&user_b), 100 * USDC_DECIMALS);
+    assert_eq!(ctx.client.get_contribution(&goal_id, &user_b), 0);
+
+    let goal = ctx.client.get_goal(&goal_id);
+    assert_eq!(goal.current_amount, 0);
+    assert!(goal.withdrawn);
+}
+
+#[test]
+fn single_owner_goal_is_not_group_and_rejects_third_party() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let other = Address::generate(&ctx.env);
+    ctx.token_admin.mint(&other, &(100 * USDC_DECIMALS));
+
+    let deadline = future_deadline(&ctx, 30 * DAY);
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(100 * USDC_DECIMALS),
+        &deadline,
+    );
+
+    let goal = ctx.client.get_goal(&goal_id);
+    assert!(!goal.is_group);
+
+    let res = ctx.client.try_deposit(&other, &goal_id, &(10 * USDC_DECIMALS));
+    assert_eq!(res, Err(Ok(Error::Unauthorized)));
+}
