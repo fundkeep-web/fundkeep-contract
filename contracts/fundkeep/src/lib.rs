@@ -59,6 +59,9 @@ impl FundKeepContract {
             return Err(Error::InvalidDeadline);
         }
 
+        // Verify that the token address is a valid contract implementing the standard Soroban token interface
+        token::TokenClient::new(&env, &token).balance(&owner);
+
         let goal_id: u32 = env
             .storage()
             .instance()
