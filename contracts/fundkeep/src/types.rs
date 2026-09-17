@@ -5,6 +5,8 @@ use soroban_sdk::{contracttype, Address};
 pub enum DataKey {
     Goal(u32),
     GoalCounter,
+    Treasury,
+    PenaltyBps,
 }
 
 #[contracttype]

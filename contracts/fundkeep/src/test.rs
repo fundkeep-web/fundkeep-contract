@@ -358,3 +358,137 @@ fn get_goal_for_missing_id_fails() {
 
     assert_eq!(result, Err(Ok(Error::GoalNotFound)));
 }
+
+// ── early_withdraw ────────────────────────────────────────────────────────
+
+#[test]
+fn early_withdraw_with_default_penalty_succeeds() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let treasury = Address::generate(&ctx.env);
+    let admin = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, DAY);
+
+    ctx.token_admin.mint(&owner, &(1_000 * USDC_DECIMALS));
+
+    // Configure treasury
+    ctx.client.set_treasury(&admin, &treasury);
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(500 * USDC_DECIMALS), // target 500
+        &deadline,
+    );
+
+    // Deposit 100 USDC (under target, locked)
+    ctx.client.deposit(&owner, &goal_id, &(100 * USDC_DECIMALS));
+
+    let goal = ctx.client.get_goal(&goal_id);
+    assert!(!goal.unlocked);
+
+    // Early withdraw: default 5% penalty (5 USDC)
+    ctx.client.early_withdraw(&owner, &goal_id);
+
+    // Check treasury received 5 USDC penalty
+    assert_eq!(ctx.token.balance(&treasury), 5 * USDC_DECIMALS);
+
+    // Check owner received 95 USDC back (900 unspent + 95 = 995)
+    assert_eq!(ctx.token.balance(&owner), 995 * USDC_DECIMALS);
+
+    // Check goal state is withdrawn and zeroed
+    let goal_after = ctx.client.get_goal(&goal_id);
+    assert!(goal_after.withdrawn);
+    assert_eq!(goal_after.current_amount, 0);
+}
+
+#[test]
+fn early_withdraw_custom_penalty_bps() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let treasury = Address::generate(&ctx.env);
+    let admin = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, DAY);
+
+    ctx.token_admin.mint(&owner, &(1_000 * USDC_DECIMALS));
+
+    // Set custom 10% penalty (1000 bps)
+    ctx.client.set_treasury(&admin, &treasury);
+    ctx.client.set_penalty_bps(&admin, &1000);
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(500 * USDC_DECIMALS),
+        &deadline,
+    );
+
+    ctx.client.deposit(&owner, &goal_id, &(200 * USDC_DECIMALS));
+
+    ctx.client.early_withdraw(&owner, &goal_id);
+
+    // 10% of 200 = 20 USDC penalty to treasury
+    assert_eq!(ctx.token.balance(&treasury), 20 * USDC_DECIMALS);
+    // 800 + 180 = 980 USDC to owner
+    assert_eq!(ctx.token.balance(&owner), 980 * USDC_DECIMALS);
+}
+
+#[test]
+fn early_withdraw_from_non_owner_fails() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let non_owner = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, DAY);
+
+    ctx.token_admin.mint(&owner, &(1_000 * USDC_DECIMALS));
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(500 * USDC_DECIMALS),
+        &deadline,
+    );
+    ctx.client.deposit(&owner, &goal_id, &(100 * USDC_DECIMALS));
+
+    let result = ctx.client.try_early_withdraw(&non_owner, &goal_id);
+    assert_eq!(result, Err(Ok(Error::Unauthorized)));
+}
+
+#[test]
+fn early_withdraw_with_zero_funds_fails() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, DAY);
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(500 * USDC_DECIMALS),
+        &deadline,
+    );
+
+    let result = ctx.client.try_early_withdraw(&owner, &goal_id);
+    assert_eq!(result, Err(Ok(Error::NoFundsToWithdraw)));
+}
+
+#[test]
+fn early_withdraw_already_withdrawn_fails() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, DAY);
+    ctx.token_admin.mint(&owner, &(1_000 * USDC_DECIMALS));
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(500 * USDC_DECIMALS),
+        &deadline,
+    );
+    ctx.client.deposit(&owner, &goal_id, &(100 * USDC_DECIMALS));
+
+    ctx.client.early_withdraw(&owner, &goal_id);
+
+    let res_second = ctx.client.try_early_withdraw(&owner, &goal_id);
+    assert_eq!(res_second, Err(Ok(Error::AlreadyWithdrawn)));
+}
+
