@@ -48,7 +48,39 @@ The script builds, deploys, and prints the resulting contract ID and Testnet RPC
 | `withdraw(caller, goal_id)` | `caller` (must be owner) | Pays out the full balance once unlocked |
 | `get_goal(goal_id) -> SavingsGoal` | none | Reads a goal's state |
 
-Errors: `GoalNotFound`, `NotUnlocked`, `AlreadyWithdrawn`, `Unauthorized`, `InvalidAmount`, `InvalidDeadline`.
+Errors: `GoalNotFound`, `NotUnlocked`, `AlreadyWithdrawn`, `Unauthorized`, `InvalidAmount`, `InvalidDeadline`, `ArithmeticOverflow`.
+
+## Instance-Storage TTL & Renewal Strategy
+
+### How TTL Affects Stored Goals
+Soroban requires contracts and ledger entries to have an active Time-To-Live (TTL) counter measured in ledgers. In FundKeep, savings goals and the global goal counter are stored directly in **Instance Storage**:
+- If instance storage expires without renewal, the contract instance and all associated goals become archived/inactive on the ledger.
+- While instance entries can be restored by submitting a Soroban state restoration transaction, goals cannot be interacted with (no deposits, deadline checks, or withdrawals) while expired.
+
+### Current Bump Behavior
+The contract uses automatic in-transaction TTL extension via `bump_instance()` on state-mutating operations (`create_goal`, `deposit`, `check_deadline` unlock, and `withdraw`):
+- **Constants**:
+  - `DAY_IN_LEDGERS = 17,280` ledgers (~24 hours at 5 seconds per ledger).
+  - `INSTANCE_BUMP_AMOUNT = 30 * DAY_IN_LEDGERS` (~30 days).
+  - `INSTANCE_LIFETIME_THRESHOLD = INSTANCE_BUMP_AMOUNT - DAY_IN_LEDGERS` (~29 days).
+- When a user interacts with the contract, `env.storage().instance().extend_ttl(...)` verifies the current TTL. If remaining lifetime is below the threshold, it extends the contract instance lifetime to 30 days out.
+
+### Operational Guidance for Maintainers & Keepers
+Because contracts with dormant goals (e.g., long-term savings goals with deadlines months away) might experience periods without user transactions:
+1. **Automated Keeper / Cron**: Maintainers should run a periodic keeper service (or cron job) that calls a read/bump transaction or directly submits a ledger footprint TTL extension via `stellar-cli` or Soroban RPC `extendFootprintTtl`:
+   ```bash
+   stellar contract extend-ttl \
+     --id <CONTRACT_ID> \
+     --network testnet \
+     --ledgers 518400
+   ```
+2. **Monitoring**: Maintainers and indexers should observe ledger entry expiration timestamps and alert when the remaining lifetime falls below 7 days.
+3. **State Restoration**: If instance storage ever enters an archived state, run:
+   ```bash
+   stellar contract restore \
+     --id <CONTRACT_ID> \
+     --network testnet
+   ```
 
 ## Contributing
 
