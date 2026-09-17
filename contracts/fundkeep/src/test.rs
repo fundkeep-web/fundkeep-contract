@@ -150,6 +150,29 @@ fn deposit_crossing_target_unlocks_in_same_call() {
 }
 
 #[test]
+fn deposit_overflow_fails_with_arithmetic_overflow() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, 30 * DAY);
+    ctx.token_admin.mint(&owner, &i128::MAX);
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(100 * USDC_DECIMALS),
+        &deadline,
+    );
+
+    // First deposit brings current_amount to i128::MAX - 10
+    let huge_deposit = i128::MAX - 10;
+    ctx.client.deposit(&owner, &goal_id, &huge_deposit);
+
+    // Second deposit of 20 would overflow i128::MAX
+    let result = ctx.client.try_deposit(&owner, &goal_id, &20);
+    assert_eq!(result, Err(Ok(Error::ArithmeticOverflow)));
+}
+
+#[test]
 fn deposit_from_non_owner_fails() {
     let ctx = setup();
     let owner = Address::generate(&ctx.env);

@@ -12,8 +12,13 @@ use soroban_sdk::{contract, contractimpl, token, Address, Env, Symbol};
 pub use errors::Error;
 pub use types::{DataKey, SavingsGoal};
 
-// TTL bump constants, matching the standard soroban-examples pattern:
-// bump 30 days out once the instance's remaining lifetime drops under 1 day.
+// Macro helper for checked addition returning ArithmeticOverflow
+macro_rules! checked_add {
+    ($a:expr, $b:expr) => {
+        $a.checked_add($b).ok_or(Error::ArithmeticOverflow)?
+    };
+}
+
 const DAY_IN_LEDGERS: u32 = 17280;
 const INSTANCE_BUMP_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
 const INSTANCE_LIFETIME_THRESHOLD: u32 = INSTANCE_BUMP_AMOUNT - DAY_IN_LEDGERS;
@@ -113,16 +118,15 @@ impl FundKeepContract {
             return Err(Error::Unauthorized);
         }
 
+        let new_amount = checked_add!(goal.current_amount, amount);
+
         token::TokenClient::new(&env, &goal.token).transfer(
             &caller,
             env.current_contract_address(),
             &amount,
         );
 
-        goal.current_amount = goal
-            .current_amount
-            .checked_add(amount)
-            .ok_or(Error::InvalidAmount)?;
+        goal.current_amount = new_amount;
 
         if goal.current_amount >= goal.target_amount {
             goal.unlocked = true;
