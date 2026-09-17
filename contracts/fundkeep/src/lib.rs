@@ -7,7 +7,7 @@ mod types;
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env, Symbol};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Symbol};
 
 pub use errors::Error;
 pub use types::{DataKey, SavingsGoal};
@@ -42,13 +42,15 @@ pub struct FundKeepContract;
 #[contractimpl]
 impl FundKeepContract {
     /// Creates a new savings goal owned by `owner`, saving `token` toward
-    /// `target_amount` until `deadline`. Returns the new goal's ID.
+    /// `target_amount` until `deadline`, with optional IPFS/on-chain `metadata_uri`.
+    /// Returns the new goal's ID.
     pub fn create_goal(
         env: Env,
         owner: Address,
         token: Address,
         target_amount: i128,
         deadline: u64,
+        metadata_uri: Option<String>,
     ) -> Result<u32, Error> {
         owner.require_auth();
 
@@ -73,6 +75,7 @@ impl FundKeepContract {
             deadline,
             unlocked: false,
             withdrawn: false,
+            metadata_uri: metadata_uri.clone(),
         };
 
         save_goal(&env, goal_id, &goal);
@@ -87,6 +90,7 @@ impl FundKeepContract {
             token,
             target_amount,
             deadline,
+            metadata_uri,
         }
         .publish(&env);
 

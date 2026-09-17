@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address};
+use soroban_sdk::{contracttype, Address, String};
 
 #[contracttype]
 #[derive(Clone)]
@@ -17,4 +17,5 @@ pub struct SavingsGoal {
     pub deadline: u64,
     pub unlocked: bool,
     pub withdrawn: bool,
+    pub metadata_uri: Option<String>,
 }

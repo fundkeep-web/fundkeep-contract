@@ -1,4 +1,4 @@
-use soroban_sdk::{contractevent, Address, Symbol};
+use soroban_sdk::{contractevent, Address, String, Symbol};
 
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -9,6 +9,7 @@ pub struct GoalCreated {
     pub token: Address,
     pub target_amount: i128,
     pub deadline: u64,
+    pub metadata_uri: Option<String>,
 }
 
 #[contractevent]
