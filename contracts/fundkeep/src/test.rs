@@ -358,3 +358,94 @@ fn get_goal_for_missing_id_fails() {
 
     assert_eq!(result, Err(Ok(Error::GoalNotFound)));
 }
+
+// ── extend_deadline ───────────────────────────────────────────────────────
+
+#[test]
+fn extend_deadline_valid_succeeds() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, DAY);
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(100 * USDC_DECIMALS),
+        &deadline,
+    );
+
+    let new_deadline = deadline + DAY;
+    ctx.client.extend_deadline(&owner, &goal_id, &new_deadline);
+
+    let goal = ctx.client.get_goal(&goal_id);
+    assert_eq!(goal.deadline, new_deadline);
+}
+
+#[test]
+fn extend_deadline_from_non_owner_fails() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let non_owner = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, DAY);
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(100 * USDC_DECIMALS),
+        &deadline,
+    );
+
+    let result = ctx.client.try_extend_deadline(&non_owner, &goal_id, &(deadline + DAY));
+    assert_eq!(result, Err(Ok(Error::Unauthorized)));
+}
+
+#[test]
+fn extend_deadline_shorter_or_equal_deadline_fails() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, DAY);
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(100 * USDC_DECIMALS),
+        &deadline,
+    );
+
+    // Same deadline
+    let res_equal = ctx.client.try_extend_deadline(&owner, &goal_id, &deadline);
+    assert_eq!(res_equal, Err(Ok(Error::InvalidDeadline)));
+
+    // Past / earlier deadline
+    let res_earlier = ctx.client.try_extend_deadline(&owner, &goal_id, &(deadline - 100));
+    assert_eq!(res_earlier, Err(Ok(Error::InvalidDeadline)));
+}
+
+#[test]
+fn extend_deadline_when_already_unlocked_or_withdrawn_fails() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, DAY);
+    ctx.token_admin.mint(&owner, &(1_000 * USDC_DECIMALS));
+
+    let goal_id = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(100 * USDC_DECIMALS),
+        &deadline,
+    );
+
+    // Deposit full target amount to unlock
+    ctx.client.deposit(&owner, &goal_id, &(100 * USDC_DECIMALS));
+    let goal = ctx.client.get_goal(&goal_id);
+    assert!(goal.unlocked);
+
+    let res_unlocked = ctx.client.try_extend_deadline(&owner, &goal_id, &(deadline + DAY));
+    assert_eq!(res_unlocked, Err(Ok(Error::GoalAlreadyUnlocked)));
+
+    // Withdraw and test again
+    ctx.client.withdraw(&owner, &goal_id);
+    let res_withdrawn = ctx.client.try_extend_deadline(&owner, &goal_id, &(deadline + DAY));
+    assert_eq!(res_withdrawn, Err(Ok(Error::AlreadyWithdrawn)));
+}
+
