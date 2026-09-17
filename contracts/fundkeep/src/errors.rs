@@ -10,4 +10,6 @@ pub enum Error {
     Unauthorized = 4,
     InvalidAmount = 5,
     InvalidDeadline = 6,
+    PenaltyRateTooHigh = 7,
+    NoFundsToWithdraw = 8,
 }
