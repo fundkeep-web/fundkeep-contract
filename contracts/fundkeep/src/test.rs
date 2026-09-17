@@ -75,6 +75,74 @@ fn create_goal_with_valid_params_returns_zero() {
 }
 
 #[test]
+fn create_and_fund_goals_with_multiple_different_tokens() {
+    let ctx = setup();
+    let owner = Address::generate(&ctx.env);
+    let deadline = future_deadline(&ctx, 30 * DAY);
+
+    // Register a second distinct SAC token (e.g. XLM / EURC)
+    let xlm_admin = Address::generate(&ctx.env);
+    let xlm_sac = ctx.env.register_stellar_asset_contract_v2(xlm_admin);
+    let xlm_address = xlm_sac.address();
+    let xlm_client = token::TokenClient::new(&ctx.env, &xlm_address);
+    let xlm_admin_client = token::StellarAssetClient::new(&ctx.env, &xlm_address);
+
+    // Register a third distinct SAC token
+    let eurc_admin = Address::generate(&ctx.env);
+    let eurc_sac = ctx.env.register_stellar_asset_contract_v2(eurc_admin);
+    let eurc_address = eurc_sac.address();
+    let eurc_client = token::TokenClient::new(&ctx.env, &eurc_address);
+    let eurc_admin_client = token::StellarAssetClient::new(&ctx.env, &eurc_address);
+
+    // Mint tokens to owner
+    ctx.token_admin.mint(&owner, &(500 * USDC_DECIMALS));
+    xlm_admin_client.mint(&owner, &(10_000 * 10_000_000));
+    eurc_admin_client.mint(&owner, &(200 * 10_000_000));
+
+    // Goal 1: USDC
+    let goal_usdc = ctx.client.create_goal(
+        &owner,
+        &ctx.token_address,
+        &(100 * USDC_DECIMALS),
+        &deadline,
+    );
+
+    // Goal 2: XLM
+    let goal_xlm = ctx.client.create_goal(
+        &owner,
+        &xlm_address,
+        &(2_000 * 10_000_000),
+        &deadline,
+    );
+
+    // Goal 3: EURC
+    let goal_eurc = ctx.client.create_goal(
+        &owner,
+        &eurc_address,
+        &(50 * 10_000_000),
+        &deadline,
+    );
+
+    assert_eq!(ctx.client.get_goal(&goal_usdc).token, ctx.token_address);
+    assert_eq!(ctx.client.get_goal(&goal_xlm).token, xlm_address);
+    assert_eq!(ctx.client.get_goal(&goal_eurc).token, eurc_address);
+
+    // Deposit to XLM goal
+    ctx.client.deposit(&owner, &goal_xlm, &(2_000 * 10_000_000));
+    let xlm_goal_state = ctx.client.get_goal(&goal_xlm);
+    assert_eq!(xlm_goal_state.current_amount, 2_000 * 10_000_000);
+    assert!(xlm_goal_state.unlocked);
+    assert_eq!(xlm_client.balance(&owner), 8_000 * 10_000_000);
+
+    // Deposit to EURC goal
+    ctx.client.deposit(&owner, &goal_eurc, &(50 * 10_000_000));
+    let eurc_goal_state = ctx.client.get_goal(&goal_eurc);
+    assert_eq!(eurc_goal_state.current_amount, 50 * 10_000_000);
+    assert!(eurc_goal_state.unlocked);
+    assert_eq!(eurc_client.balance(&owner), 150 * 10_000_000);
+}
+
+#[test]
 fn create_goal_with_zero_target_fails() {
     let ctx = setup();
     let owner = Address::generate(&ctx.env);
